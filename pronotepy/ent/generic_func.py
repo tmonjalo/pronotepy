@@ -15,6 +15,95 @@ HEADERS = {
 }
 
 
+class AuthSession(requests.Session):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.hooks = {"response": lambda r, *args, **kwargs: r.raise_for_status()}
+
+    def request(self, *args, **kwargs):
+        kwargs.setdefault("allow_redirects", True)
+        self.response = super().request(*args, **kwargs)
+        self.response.html = BeautifulSoup(self.response.text, "html.parser")
+        return self.response
+
+    def find_form_field(self, key, value, attr):
+        tag = None if value == "submit" else "input"
+        field = self.response.html.find(tag, {key: value})
+        return field.get(attr, None) if field else None
+
+    @property
+    def form_field_user(self):
+        return self.find_form_field("type", "text", "name")
+
+    @property
+    def form_field_password(self):
+        return self.find_form_field("type", "password", "name")
+
+    @property
+    def form_field_submit(self):
+        return self.find_form_field("type", "submit", "name")
+
+    @property
+    def response_dump(self):
+        if not self.response:
+            return None
+        r = self.response
+        return f"status: {r.status_code}\nlocation: {r.url}\ncontent: \n{r.text}"
+
+    @property
+    def saml(self):
+        for saml_type in ("SAMLRequest", "SAMLResponse"):
+            saml = self.find_form_field("name", saml_type, "value")
+            if saml:
+                return {saml_type: saml}
+        return None
+
+    def post_form(self, payload=None):
+        if payload is None:
+            payload = {}
+        for field in self.response.html.find_all(["input", "button"]):
+            name = field.get("name", None)
+            if name and name not in payload:
+                payload[name] = field.get("value", "")
+        url = self.response.html.find("form")["action"]
+        if url.startswith("/"):
+            url = urljoin(self.response.url, url)
+        return self.post(url, data=payload)
+
+
+def generic_auth(
+    username: str, password: str, pronote_url: str = "", **opts
+) -> requests.cookies.RequestsCookieJar:
+    with AuthSession() as session:
+        session.get(pronote_url)
+        has_saml = True if session.saml else False
+        if has_saml:
+            # received SAML request from the service provider (SP)
+            # send SAML request to the identity provider (IdP)
+            session.post_form()
+        if session.form_field_password:
+            # received login form
+            field_user = session.form_field_user
+            field_pass = session.form_field_password
+            if not field_user or not field_pass:
+                raise ENTLoginError("Invalid login form")
+            payload = {field_user: username, field_pass: password}
+        elif has_saml:
+            raise ENTLoginError("SAML connection failure")
+        else:
+            # no login, no cookies
+            return None
+        # send credentials (to the IdP in SAML case)
+        session.post_form(payload)
+        if has_saml:
+            if not session.saml:
+                raise ENTLoginError("SAML login failure")
+            # received SAML response from the identity provider (IdP)
+            # send SAML response to the service provider (SP)
+            session.post_form()
+        return session.cookies
+
+
 def _sso_redirect(
     session: requests.Session,
     response: requests.Response,

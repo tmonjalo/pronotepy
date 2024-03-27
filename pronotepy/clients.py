@@ -27,6 +27,7 @@ from .pronoteAPI import (
     _prepare_onglets,
     log,
 )
+from .ent.generic_func import generic_auth
 
 if TYPE_CHECKING:
     from requests.cookies import RequestsCookieJar
@@ -416,7 +417,7 @@ class Client(ClientBase):
         pronote_url: str,
         username: str = "",
         password: str = "",
-        ent: Optional[Callable] = None,
+        ent: Optional[Callable] = generic_auth,
         mode: str = "normal",
         uuid: str = "",
     ) -> None:
@@ -778,7 +779,7 @@ class ParentClient(Client):
         pronote_url: str,
         username: str = "",
         password: str = "",
-        ent: Optional[Callable] = None,
+        ent: Optional[Callable] = generic_auth,
         mode: str = "normal",
         uuid: str = "",
     ) -> None:
@@ -876,7 +877,7 @@ class VieScolaireClient(ClientBase):
         pronote_url: str,
         username: str = "",
         password: str = "",
-        ent: Optional[Callable] = None,
+        ent: Optional[Callable] = generic_auth,
         mode: str = "normal",
         uuid: str = "",
     ) -> None:
